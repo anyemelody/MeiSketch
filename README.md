@@ -19,7 +19,7 @@ to print the effect: cmd+s
 
 ## Inspiration
 The visual inspiration of this project is from the snow scene of the Forbidden City. The red walls and green windows are the most iconic features of the Forbidden City, as well as the most representative features of Chinese traditional architecture.
-![](https://github.com/anyemelody/MeiSketch/blob/main/Images/reference.png)
+![](https://github.com/anyemelody/MeiSketch/blob/main/images/reference.png)
 
 
 ## Code Structure
@@ -31,6 +31,7 @@ The code is written in GLSL and consists of three parts:
 
 ### "flower.frag"
 For the branch design, I used the fracal tree algorithm and applied random to the branch rotation angle. The length and width of the branches are using simple noise function and set connections between the preview branches properties to make the branches look more natural.
+![](https://github.com/anyemelody/MeiSketch/blob/main/images/fractal%20branch.png)
 I have also added noise pattern to the branches to create some visual effects.
 
             alpha *= smoothstep(0., 0.1, fract((1. - noise(st * 30.)) * 5.));
