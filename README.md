@@ -8,10 +8,12 @@ https://anyemelody.github.io/MeiSketch/
 
 ## How to use
 The effect is written in GLSL and [canvas-sketch](https://github.com/mattdesl/canvas-sketch) for printing use cases. All original files are in `src` folder. 
-If you download the `src` folder for local use,  
+Download the `src` folder for local use,  
  
 command to preview the effect:
+
 `canvas-sketch index.js --open`
+
 to print the effect: cmd+s
 
 
@@ -27,10 +29,11 @@ The code is written in GLSL and consists of three parts:
 3. "snow.frag" which defines the visual effect of the snowing scene. And I referred the snowing effect from: https://www.shadertoy.com/view/Mdt3Df
 
 
-"flower.frag"
+### "flower.frag"
 For the branch design, I used the fracal tree algorithm and applied random to the branch rotation angle. The length and width of the branches are using simple noise function and set connections between the preview branches properties to make the branches look more natural.
 I have also added noise pattern to the branches to create some visual effects.
-  alpha *= smoothstep(0., 0.1, fract((1. - noise(st * 30.)) * 5.));
+
+            alpha *= smoothstep(0., 0.1, fract((1. - noise(st * 30.)) * 5.));
 
 For the flower design, I mainly used the Rose curve function with perlin noise to generate the natural petal shape. Applied simple noise to the petal color to create the light and dark contrast and make the flower look more realistic.
 
@@ -50,5 +53,5 @@ For the flower design, I mainly used the Rose curve function with perlin noise t
             vec4 petalLine = vec4(c, petalAlpha);
             petalColor = mix(petalColor, petalLine, petalAlpha);
 
-"windowPattern.frag"
+### "windowPattern.frag"
 Got inspiration from the window pattern of the Forbidden City. I generated the window pattern by using the Voronoi pattern and combined with the sdf shape to create the window frame. Feel free to change the window pattern by tweaking the GUI on the preview page.
