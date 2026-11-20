@@ -120,12 +120,11 @@ function createTree(trunkTilt) {
   }
 
   // Mirrors the flower layout in flower.frag, to know where each petal sits.
-  // Every fifth node carries a flower from the start. The other nodes, except
-  // the ones holding a bud, are empty spots where a flower can bud later.
+  // Every fifth node may carry a flower from the start. The other nodes are
+  // empty spots where a flower can bud later.
   const flowers = [];
   for (let i = 16; i < n; i++) {
     const original = i % 5 === 0;
-    if (!original && i % 7 === 0) continue;
     const open = original && Math.random() < INITIAL_FLOWERS;
     const petalAngles = [];
     let angle = Math.PI * random(i) * 2;
@@ -143,7 +142,7 @@ function createTree(trunkTilt) {
       shakenAt: 0,
       shed: 0,
       loosened: 0,
-      // 0 = nothing there, up to 0.3 the bud swells, from 0.35 it opens, 1 = in full bloom
+      // 0 = nothing there, then the petals grow out of the centre, 1 = in full bloom
       bloom: open ? 1 : 0,
       phase: open ? 'open' : 'empty',
     });

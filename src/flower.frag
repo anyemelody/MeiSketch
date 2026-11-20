@@ -15,6 +15,8 @@ precision mediump float;
 
 uniform vec2 u_resolution;
 uniform sampler2D u_wall;
+// How sheer the rim of a petal is: 0 is solid, 1 fades out completely.
+uniform float u_sheer;
 // Posed skeleton from tree.js.
 // u_segA: branch start, end of its first segment.
 // u_segB: end of its second segment, sway angle, cull radius.
@@ -183,6 +185,42 @@ float fractalTree(vec2 st) {
     return alpha;
 }
 
+// Lays one petal over what is already in petalColor. pos is relative to the petal's base
+// and the petal points along +x. Along each ray from the base it reaches as far as the rose curve.
+// grown: 0 to 1, how far the petal has grown out of its base.
+void layPetal(inout vec4 petalColor, vec2 pos, float grown, float petalRadius, float slim, float bulge, float petalNoise, float hue, float baseSaturate, float tipSaturate, float light, float lightBase) {
+    //a growing petal is the full petal scaled down around its base, so it stays attached where it joins the centre
+    vec2 warped = pos / grown - vec2(bulge); //make the petal shape has more dynamic shape
+    float dis = length(warped);
+    float ray = atan(warped.y, warped.x);
+    float t = atan(sin(ray), slim * cos(ray)); //rose curve parameter of the rim on this ray
+    float r = warped.x > 0. ? petalRadius * cos(t) * length(vec2(cos(t), slim * sin(t))) : 0.;
+    r = max(r, 0.0001);
+    float rim = r + 0.005;
+    float cover = 1. - smoothstep(rim - 0.0006 / grown, rim + 0.0006 / grown, dis);
+    if(cover <= 0.) {
+        return;
+    }
+    //use point on petal to do color manipulation
+    //white is reached a little before the rim and overshoots past it, that is the crisp bright edge
+    float saturate = clamp(remap(dis, 0.0, r * 0.88, baseSaturate, tipSaturate) - petalNoise * 0.3, -0.08, 1.);
+    //the darker folds stay lit from behind instead of going dull
+    float fold = petalNoise * 0.2 + 0.9;
+    float brightness = petalNoise * light + lightBase + 0.7 * max(1. - fold, 0.);
+    vec3 c = hsv2rgb(vec3(hue, saturate, brightness));
+    //where the petal bulges toward the light it glints white
+    c = mix(c, vec3(1.), 0.45 * smoothstep(0.1, 0.6, petalNoise));
+    //solid at the base, toward the rim the petal thins out: it turns paler and lets a little through
+    float along = clamp(dis / rim, 0., 1.);
+    float thin = u_sheer * along * along;
+    c = mix(c, vec3(1.), 0.25 * thin);
+    float petalAlpha = clamp(cover * (1. - 0.4 * thin), 0., 1.);
+    //petals lie over each other like layers of thin paper
+    float alpha = petalAlpha + petalColor.a * (1. - petalAlpha);
+    petalColor.rgb = (c * petalAlpha + petalColor.rgb * petalColor.a * (1. - petalAlpha)) / max(alpha, 0.0001);
+    petalColor.a = alpha;
+}
+
 // shed: bitmask of petals that have fallen off.
 // only: draw just this petal and no pistil, or every petal when negative.
 // bloom: 0 to 1, the bud swells first, then its petals fan out into the open flower.
@@ -191,7 +229,6 @@ vec4 flower(vec2 st, vec2 pos, float hue, float size, float index, float shed, f
     vec4 pistilColor = vec4(0.0);
     float pistilAlpha = 0.0;
     vec4 petalColor = vec4(0.0);
-    float petalAlpha = 0.;
     vec2 centerPoint = vec2(0.0, 0.0);
     float petalNum = 5.;
     float petalNoise = perlin(st * 40.);
@@ -199,7 +236,6 @@ vec4 flower(vec2 st, vec2 pos, float hue, float size, float index, float shed, f
     float petalBit = 1.;
 
     float open = 1.;
-    float petalRadius = size; //petal size
     float petalDis = 0.013; //petal to center distance
     float slim = 0.7;
     float wobble = 0.01;
@@ -209,17 +245,11 @@ vec4 flower(vec2 st, vec2 pos, float hue, float size, float index, float shed, f
     float lightBase = 0.7;
     float pistilGrow = 1.;
     if(bloom < 1.) {
-        //a closed flower is the same fan of slim petals as a bud
-        open = smoothstep(0.35, 1., bloom);
-        petalRadius = size * mix(0.75, 1., open) * smoothstep(0., 0.3, bloom);
-        petalDis = 0.013 * open;
-        slim = mix(0.6, 0.7, open);
-        wobble = 0.01 * open;
+        //a young flower is small, deeper in colour and sits tight on its centre
+        open = smoothstep(0., 1., bloom);
         baseSaturate = mix(0.95, 0.8, open);
-        tipSaturate = mix(0.45, 0.2, open);
-        light = mix(0.2, 0.5, open);
-        lightBase = mix(0.9, 0.7, open);
-        pistilGrow = smoothstep(0.5, 1., open);
+        tipSaturate = mix(0.65, 0.2, open);
+        pistilGrow = smoothstep(0.2, 1., bloom);
     }
 
     mat2 startRot = rotate2d(PI * random(index) * 2.);
@@ -228,9 +258,8 @@ vec4 flower(vec2 st, vec2 pos, float hue, float size, float index, float shed, f
     //draw one flower
     for(float i = 0.; i < 5.; i++) {
         float rotateAngle = (0.2 + random(i) * 0.1) * 2. * PI; //petal rotation//random(i)
-        if(bloom < 1.) {
-            rotateAngle = mix(0.07 * PI, rotateAngle, open);
-        }
+        //the petals grow out of the centre one after another
+        float grown = bloom < 1. ? smoothstep(i * 0.06, 0.76 + i * 0.06, bloom) : 1.;
         mat2 rotMatrix = rotate2d(rotateAngle);
         pos *= rotMatrix;
         bool hasPetal = only < 0. ? mod(floor(shed / petalBit), 2.) == 0. : i == only;
@@ -240,89 +269,34 @@ vec4 flower(vec2 st, vec2 pos, float hue, float size, float index, float shed, f
         }
 
         pos -= vec2(petalDis, 0); //translate next petal dis from the center
-        //draw one petal
-        for(float j = 0.; j < PI; j += 0.1) {
-            //draw lines to form petal
-            vec2 endPoint = rosegraph(petalRadius, 1., j);
-            endPoint.y *= slim; //make the petal slim 
-            endPoint += vec2(petalNoise * wobble); //make the petal shape has more dynamic shape
-            if(hasPetal) {
-                petalAlpha = segment(pos, centerPoint, endPoint, 0.005);
-                //use point on petal to do color manipulation
-                float dis = distance(pos, centerPoint);
-                float r = distance(centerPoint, endPoint);
-                petalAlpha *= petalNoise * 0.2 + 0.9;//alpha variation 
-                float saturate = remap(dis, 0.0, r, baseSaturate, tipSaturate) - petalNoise * 0.3;
-                float brightness = petalNoise * light + lightBase;
-                vec3 c = vec3(hue, saturate, brightness);
-                c = hsv2rgb(c);
-                vec4 petalLine = vec4(c, petalAlpha);
-                petalColor = mix(petalColor, petalLine, petalAlpha);
-            }
-            //define the pistil details
-            if(only < 0. && pistilGrow > 0. && mod(j, 0.3) == 0.) {
-                float pistilNoise = random2D(vec2(i, j));
-                vec2 pistil = endPoint * (pistilNoise * 0.5 + 0.3) * pistilGrow; //the pistil size 
-                pistil.y *= 2.;
-                vec2 pistilPos = pos + vec2(petalDis, 0);
-                pistilAlpha = segment(pistilPos, centerPoint, pistil, 0.001);
-                vec3 hsvPistil = vec3(pistilNoise * 0.2, pistilNoise, 0.7);
-                hsvPistil = hsv2rgb(hsvPistil);
-                vec4 pistilLine = vec4(hsvPistil, pistilAlpha);
-                pistilColor = mix(pistilColor, pistilLine, pistilAlpha);
-            }
+        if(hasPetal && grown > 0.02) {
+            layPetal(petalColor, pos, grown, size, slim, petalNoise * wobble, petalNoise, hue, baseSaturate, tipSaturate, light, lightBase);
+        }
+        folowerColor = petalColor;
 
-            if(pistilColor.a > 0.) {
-                folowerColor = pistilColor;
-            } else {
-                folowerColor = petalColor;
+        //define the pistil details
+        if(only < 0. && pistilGrow > 0.) {
+            for(float j = 0.; j < PI; j += 0.1) {
+                if(mod(j, 0.3) == 0.) {
+                    vec2 endPoint = rosegraph(size, 1., j);
+                    endPoint.y *= slim;
+                    endPoint += vec2(petalNoise * wobble);
+                    float pistilNoise = random2D(vec2(i, j));
+                    vec2 pistil = endPoint * (pistilNoise * 0.5 + 0.3) * pistilGrow; //the pistil size 
+                    pistil.y *= 2.;
+                    vec2 pistilPos = pos + vec2(petalDis, 0);
+                    pistilAlpha = segment(pistilPos, centerPoint, pistil, 0.001);
+                    vec3 hsvPistil = vec3(pistilNoise * 0.2, pistilNoise, 0.7);
+                    hsvPistil = hsv2rgb(hsvPistil);
+                    vec4 pistilLine = vec4(hsvPistil, pistilAlpha);
+                    pistilColor = mix(pistilColor, pistilLine, pistilAlpha);
+                }
             }
         }
         pos += vec2(petalDis, 0); //translate back to the origin    
     }
 
-    return folowerColor;
-}
-
-vec4 bud(vec2 st, vec2 pos, float hue, float size, float index) {
-    vec4 folowerColor = vec4(0.0);
-    vec4 petalColor = vec4(0.0);
-    float petalAlpha = 0.;
-    vec2 centerPoint = vec2(0.0, 0.0);
-    float petalNoise = perlin(st * 30.);
-
-    mat2 startRot = rotate2d(PI * random(index) * 2.);
-    pos *= startRot;
-
-    for(float i = 0.; i < 3.; i++) {
-        float rotateAngle = 0.1 * PI; //petal rotation
-        mat2 rotMatrix = rotate2d(rotateAngle);
-        pos *= rotMatrix;
-        float petalRadius = size; //petal size
-
-        //draw one petal
-        for(float j = 0.; j < PI; j += 0.1) {
-            //draw lines to form petal
-            vec2 endPoint = rosegraph(petalRadius, 1., j);
-            endPoint.y *= 0.6; //make the petal slim 
-            // endPoint += vec2(petalNoise*0.01); //make the petal shape has more dynamic shape
-            petalAlpha = segment(pos, centerPoint, endPoint, 0.005);
-            //use point on petal to do color manipulation
-            float dis = distance(pos, centerPoint);
-            float r = distance(centerPoint, endPoint);
-            petalAlpha *= petalNoise * 0.2 + 0.9;//alpha variation petalNoise*0.2+0.9
-            float saturate = remap(dis, 0.0, r, 0.7, 0.2) - petalNoise * 0.3;
-            float brightness = petalNoise * 0.2 + 0.9;
-            vec3 c = vec3(hue, saturate, brightness);
-            c = hsv2rgb(c);
-            vec4 petalLine = vec4(c, petalAlpha);
-            petalColor = mix(petalColor, petalLine, petalAlpha);
-            folowerColor = petalColor;
-        }
-
-    }
-
-    return folowerColor;
+    return pistilColor.a > 0. ? pistilColor : folowerColor;
 }
 
 void main() {
@@ -333,25 +307,22 @@ void main() {
 
     //flower
     vec4 finalColor = mix(bgColor, treeColor, treeColor.a);
-    vec4 flowerColor = vec4(0.);
 
     for(int i = 16; i < BRANCH_COUNT; i++) {
         float index = float(i);
+        //every fifth spot holds its flower a little off the branch, the others sit right on it
         bool isFlower = mod(index, 5.) == 0.;
-        bool isBud = !isFlower && mod(index, 7.) == 0.;
         float shed = floor(u_rest[i].w / 2.);
         float bloom = u_rest[i].w - 2. * shed;
-        //a flower that budded later on a spot that started out empty, it sits right on the branch
-        bool isLate = !isFlower && !isBud && bloom > 0.;
 
-        if(isFlower || isBud || isLate) {
+        if(bloom > 0.) {
             vec4 color = vec4(0.);
             vec2 restPos = u_rest[i].xy;
             float flowerSize = random(index) * 0.02 + 0.016;
             float reach = flowerSize + 0.045;
             vec2 toNode = st - u_segA[i].xy;
 
-            if((isBud || bloom > 0.) && length(toNode) < reach + 0.071) {
+            if(length(toNode) < reach + 0.071) {
                 vec2 offset = isFlower ? (vec2(random(restPos.x), random(restPos.y)) - 0.5) * 0.1 : vec2(0.);
                 vec2 toCenter = toNode - rotate(offset, u_segB[i].z);
 
@@ -362,22 +333,12 @@ void main() {
                     float flowerHue = remap(random2D(restPos), 0., 1.0, 0.92, 1.);
                     // every whole flower goes through this one call: a second call site
                     // elsewhere in the shader makes the frame several times slower
-                    if(isBud) {
-                        color = bud(restSt, pos, flowerHue, flowerSize, index);
-                    } else {
-                        color = flower(restSt, pos, flowerHue, flowerSize, index, shed, -1., bloom);
-                    }
+                    color = flower(restSt, pos, flowerHue, flowerSize, index, shed, -1., bloom);
                 }
             }
-            if(isLate) {
-                for(int layer = 0; layer < 3; layer++) {
-                    finalColor = mix(finalColor, color, color.a);
-                }
-            } else {
-                flowerColor = color;
-            }
+            //each flower is laid on once, so a sheer petal lets the branch and wall show through
+            finalColor.rgb = mix(finalColor.rgb, color.rgb, clamp(color.a, 0., 1.));
         }
-        finalColor = mix(finalColor, flowerColor, flowerColor.a);
     }
 
     //falling petals, each one is a petal of its flower carried along rigidly
@@ -395,10 +356,7 @@ void main() {
         vec2 pos = u_fallC[i].xy + local;
         float petalHue = remap(random2D(restPos), 0., 1.0, 0.92, 1.);
         vec4 petalColor = flower(restPos + offset + pos, pos, petalHue, petalSize, u_fallA[i].z, 0., u_fallA[i].w, 1.);
-        //flowers are composited several times over, so match their opacity
-        for(int layer = 0; layer < 3; layer++) {
-            finalColor = mix(finalColor, petalColor, petalColor.a);
-        }
+        finalColor.rgb = mix(finalColor.rgb, petalColor.rgb, clamp(petalColor.a, 0., 1.));
     }
 
     gl_FragColor = finalColor;

@@ -38,7 +38,7 @@ function updateWall() {
 
 //setup gui
 const gui = new dat.GUI({ name: 'My GUI' });
-let guiProperty = { bgColor: [121, 23, 27.5], WallAge: 0.6, WindowShape: 8, WindowColor: [46, 77, 61] };
+let guiProperty = { bgColor: [121, 23, 27.5], WallAge: 0.6, PetalSheer: 0.5, WindowShape: 8, WindowColor: [46, 77, 61] };
 
 const settings = {
   dimensions: [1024, 1024],
@@ -66,6 +66,10 @@ gui.addColor(guiProperty, 'WindowColor', [46, 77, 61]).onChange(() => {
 });
 gui.addColor(guiProperty, 'bgColor', [121, 23, 27.5]).onChange(updateWall);
 gui.add(guiProperty, 'WallAge', 0, 1, 0.01).onChange(updateWall);
+gui.add(guiProperty, 'PetalSheer', 0, 1, 0.01).onChange(() => {
+  flowerShader.setUniform('u_sheer', guiProperty.PetalSheer);
+  drawFlowerCanvas();
+});
 
 
 
@@ -124,6 +128,7 @@ const sketch = ({ canvas }) => {
   wallShader.setUniform('u_color', [0.475, 0.090, 0.108, 1.]);
   wallShader.setUniform('u_age', guiProperty.WallAge);
   drawWall();
+  flowerShader.setUniform('u_sheer', guiProperty.PetalSheer);
   tree = createTree(random(1));
   //an opening gust, so the tree is already moving when it appears
   tree.breeze(random([-1, 1]), random(-0.4, 0.1));
