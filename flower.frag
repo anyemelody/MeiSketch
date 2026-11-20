@@ -188,25 +188,63 @@ float fractalTree(vec2 st) {
 // Lays one petal over what is already in petalColor. pos is relative to the petal's base
 // and the petal points along +x. Along each ray from the base it reaches as far as the rose curve.
 // grown: 0 to 1, how far the petal has grown out of its base.
-void layPetal(inout vec4 petalColor, vec2 pos, float grown, float petalRadius, float slim, float bulge, float petalNoise, float hue, float baseSaturate, float tipSaturate, float light, float lightBase) {
+float cross2(vec2 a, vec2 b) {
+    return a.x * b.y - a.y * b.x;
+}
+
+//distance from p to the line from the origin to b
+float spokeDist(vec2 p, vec2 b) {
+    float h = clamp(dot(p, b) / max(dot(b, b), 0.00000001), 0., 1.);
+    return length(p - b * h);
+}
+
+//distance to a petal: everything between its base at the origin and the rim, a squashed rose curve
+//(an ellipse touching the base) pushed off by shift. negative inside
+float petalDist(vec2 p, vec2 ab, vec2 mid) {
+    vec2 q = p - mid;
+    float k0 = length(q / ab);
+    float d = k0 * (k0 - 1.) / max(length(q / (ab * ab)), 0.000001);
+    vec2 o = -mid / ab;
+    float od2 = dot(o, o);
+    if(od2 > 1.) {
+        //the base lies outside the shifted rim: fill the wedge between the base and the two tangent points
+        vec2 perp = vec2(-o.y, o.x) * sqrt(od2 - 1.);
+        vec2 t1 = mid + (o + perp) / od2 * ab;
+        vec2 t2 = mid + (o - perp) / od2 * ab;
+        float sgn = cross2(t1, t2);
+        bool inWedge = cross2(t1, p) * sgn >= 0. && cross2(p, t2) * sgn >= 0. && cross2(t2 - t1, p - t1) * sgn >= 0.;
+        d = inWedge ? min(d, -0.002) : min(d, min(spokeDist(p, t1), spokeDist(p, t2)));
+    }
+    return d;
+}
+
+void layPetal(inout vec4 petalColor, vec2 pos, float grown, float petalRadius, float slim, float bulge, float calm, float petalNoise, float hue, float baseSaturate, float tipSaturate, float fade) {
     //a growing petal is the full petal scaled down around its base, so it stays attached where it joins the centre
-    vec2 warped = pos / grown - vec2(bulge); //make the petal shape has more dynamic shape
-    float dis = length(warped);
-    float ray = atan(warped.y, warped.x);
-    float t = atan(sin(ray), slim * cos(ray)); //rose curve parameter of the rim on this ray
-    float r = warped.x > 0. ? petalRadius * cos(t) * length(vec2(cos(t), slim * sin(t))) : 0.;
-    r = max(r, 0.0001);
-    float rim = r + 0.005;
-    float cover = 1. - smoothstep(rim - 0.0006 / grown, rim + 0.0006 / grown, dis);
+    vec2 p = pos / grown;
+    vec2 ab = vec2(0.5 * petalRadius, 0.5 * petalRadius * slim);
+    vec2 mid = vec2(0.5 * petalRadius, 0.) + vec2(bulge); //make the petal shape has more dynamic shape
+    //the fine noise gives the rim its bumps and notches, but on its own it is steep enough to tear holes
+    //and stray blobs. so it may only move the rim a little way from a calmer outline
+    float dCalm = petalDist(p, ab, vec2(0.5 * petalRadius, 0.) + vec2(calm));
+    float d = clamp(petalDist(p, ab, mid), dCalm - 0.006, dCalm + 0.006);
+    float cover = 1. - smoothstep(0.005 - 0.0006 / grown, 0.005 + 0.0006 / grown, d);
     if(cover <= 0.) {
         return;
     }
+    //length of the petal along this ray from the base, for the colour gradient
+    float dis = length(p);
+    vec2 dir = p / max(dis, 0.000001) / ab;
+    vec2 cs = mid / ab;
+    float qa = dot(dir, dir);
+    float qb = dot(dir, cs);
+    float r = max((qb + sqrt(max(qb * qb - qa * (dot(cs, cs) - 1.), 0.))) / qa, 0.0001);
+    float rim = r + 0.005;
     //use point on petal to do color manipulation
-    //white is reached a little before the rim and overshoots past it, that is the crisp bright edge
-    float saturate = clamp(remap(dis, 0.0, r * 0.88, baseSaturate, tipSaturate) - petalNoise * 0.3, -0.08, 1.);
-    //the darker folds stay lit from behind instead of going dull
-    float fold = petalNoise * 0.2 + 0.9;
-    float brightness = petalNoise * light + lightBase + 0.7 * max(1. - fold, 0.);
+    //white is reached at fade of the way to the rim, each petal has its own, so some keep colour to the edge and some get a bright rim
+    float saturate = clamp(remap(dis, 0.0, r * fade, baseSaturate, tipSaturate) - petalNoise * 0.3, -0.08, 1.);
+    //saturation does most of the work, so the pink pales to white instead of greying.
+    //brightness only dips a little in the hollows of the noise, enough for light and shade
+    float brightness = mix(0.74, 1., smoothstep(-0.6, 0.3, petalNoise));
     vec3 c = hsv2rgb(vec3(hue, saturate, brightness));
     //where the petal bulges toward the light it glints white
     c = mix(c, vec3(1.), 0.45 * smoothstep(0.1, 0.6, petalNoise));
@@ -232,17 +270,16 @@ vec4 flower(vec2 st, vec2 pos, float hue, float size, float index, float shed, f
     vec2 centerPoint = vec2(0.0, 0.0);
     float petalNum = 5.;
     float petalNoise = perlin(st * 40.);
+    float calmNoise = perlin(st * 16. + 7.);
 
     float petalBit = 1.;
 
     float open = 1.;
-    float petalDis = 0.013; //petal to center distance
+    float petalDis = 0.006; //petal to center distance
     float slim = 0.7;
     float wobble = 0.01;
     float baseSaturate = 0.8;
     float tipSaturate = 0.2;
-    float light = 0.5;
-    float lightBase = 0.7;
     float pistilGrow = 1.;
     if(bloom < 1.) {
         //a young flower is small, deeper in colour and sits tight on its centre
@@ -255,9 +292,16 @@ vec4 flower(vec2 st, vec2 pos, float hue, float size, float index, float shed, f
     mat2 startRot = rotate2d(PI * random(index) * 2.);
     pos *= startRot;
 
+    //the gaps between petals are uneven, but together they make exactly one turn,
+    //otherwise the last petal lands on top of the first and the flower reads as four petals
+    float turn = 0.;
+    for(float i = 0.; i < 5.; i++) {
+        turn += 0.2 + random(i) * 0.1;
+    }
+
     //draw one flower
     for(float i = 0.; i < 5.; i++) {
-        float rotateAngle = (0.2 + random(i) * 0.1) * 2. * PI; //petal rotation//random(i)
+        float rotateAngle = (0.2 + random(i) * 0.1) / turn * 2. * PI; //petal rotation//random(i)
         //the petals grow out of the centre one after another
         float grown = bloom < 1. ? smoothstep(i * 0.06, 0.76 + i * 0.06, bloom) : 1.;
         mat2 rotMatrix = rotate2d(rotateAngle);
@@ -270,7 +314,7 @@ vec4 flower(vec2 st, vec2 pos, float hue, float size, float index, float shed, f
 
         pos -= vec2(petalDis, 0); //translate next petal dis from the center
         if(hasPetal && grown > 0.02) {
-            layPetal(petalColor, pos, grown, size, slim, petalNoise * wobble, petalNoise, hue, baseSaturate, tipSaturate, light, lightBase);
+            layPetal(petalColor, pos, grown, size, slim, petalNoise * wobble, calmNoise * wobble, petalNoise, hue, baseSaturate, tipSaturate, 0.85 + 0.15 * random2D(vec2(index, i)));
         }
         folowerColor = petalColor;
 
