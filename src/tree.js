@@ -9,6 +9,7 @@ const random2D = (x, y) => fract(Math.sin(x * 12.9898 + y * 78.233) * 43758.5453
 const DAMPING_RATIO = 0.15;
 const PUSH_RADIUS = 0.07;
 const PUSH_STRENGTH = 0.8;
+const BREEZE_STRENGTH = 0.1;
 // How much a child lags behind when its parent accelerates.
 const BRANCH_INERTIA = 0.12;
 const FLOWER_INERTIA = 0.5;
@@ -37,6 +38,10 @@ const BLOOM_INTERVAL = [4, 9];
 // How many flowers may open on top of the ones the tree starts with.
 const EXTRA_BLOOMS = 6;
 const BLOOM_SPACING = 0.055;
+// Share of the flower spots that are in bloom when the tree first appears.
+const INITIAL_FLOWERS = 0.55;
+// The tree also starts with this many buds about to open.
+const INITIAL_BUDS = [1, 3];
 
 function createTree(trunkTilt) {
   const n = BRANCH_COUNT;
@@ -121,6 +126,7 @@ function createTree(trunkTilt) {
   for (let i = 16; i < n; i++) {
     const original = i % 5 === 0;
     if (!original && i % 7 === 0) continue;
+    const open = original && Math.random() < INITIAL_FLOWERS;
     const petalAngles = [];
     let angle = Math.PI * random(i) * 2;
     for (let k = 0; k < PETAL_COUNT; k++) {
@@ -138,14 +144,14 @@ function createTree(trunkTilt) {
       shed: 0,
       loosened: 0,
       // 0 = nothing there, up to 0.3 the bud swells, from 0.35 it opens, 1 = in full bloom
-      bloom: original ? 1 : 0,
-      phase: original ? 'open' : 'empty',
+      bloom: open ? 1 : 0,
+      phase: open ? 'open' : 'empty',
     });
-    rest[i * 4 + 3] = original ? 1 : 0;
+    rest[i * 4 + 3] = open ? 1 : 0;
   }
   const loosening = [];
   const falling = [];
-  const petalBudget = (flowers.filter((flower) => flower.bloom > 0).length + EXTRA_BLOOMS) * PETAL_COUNT;
+  let petalBudget = Infinity;
   let clock = 0;
   let nextBloomAt = 1.5;
 
@@ -205,6 +211,16 @@ function createTree(trunkTilt) {
       velocity[i] = limit * Math.tanh((velocity[i] + PUSH_STRENGTH * falloff * compliance[i] * torque) / limit);
     }
     shake(x, y);
+    atRest = false;
+  }
+
+  // A gust along (fx, fy) that catches every branch at once.
+  function breeze(fx, fy) {
+    for (let i = 0; i < n; i++) {
+      const torque = Math.cos(restAngle[i] + sway[i]) * fy - Math.sin(restAngle[i] + sway[i]) * fx;
+      const limit = omegas[i] * MAX_SWAY;
+      velocity[i] = limit * Math.tanh((velocity[i] + BREEZE_STRENGTH * compliance[i] * torque) / limit);
+    }
     atRest = false;
   }
 
@@ -325,7 +341,7 @@ function createTree(trunkTilt) {
     return count;
   }
 
-  function startBloom() {
+  function startBloom(bloom) {
     const inBloom = flowers.filter((flower) => flower.bloom > 0);
     const petals = inBloom.reduce((sum, flower) => sum + petalsLeft(flower), 0);
     if (petalBudget - petals < PETAL_COUNT) return;
@@ -339,14 +355,18 @@ function createTree(trunkTilt) {
         return Math.hypot(x - ox, y - oy) >= BLOOM_SPACING;
       });
     });
-    if (spots.length) spots[Math.floor(Math.random() * spots.length)].phase = 'blooming';
+    if (!spots.length) return;
+    const spot = spots[Math.floor(Math.random() * spots.length)];
+    spot.phase = 'blooming';
+    spot.bloom = bloom;
+    rest[spot.node * 4 + 3] = bloom;
   }
 
   // Opens new buds, and lets flowers that lost every petal wither so the spot frees up.
   function updateBlooms(dt) {
     if (clock >= nextBloomAt) {
       nextBloomAt = clock + BLOOM_INTERVAL[0] + Math.random() * (BLOOM_INTERVAL[1] - BLOOM_INTERVAL[0]);
-      startBloom();
+      startBloom(0);
     }
     let changing = false;
     for (const flower of flowers) {
@@ -396,7 +416,10 @@ function createTree(trunkTilt) {
   }
 
   pose();
-  return { segA, segB, rest, fallA, fallB, fallC, push, step };
+  const buds = INITIAL_BUDS[0] + Math.floor(Math.random() * (INITIAL_BUDS[1] - INITIAL_BUDS[0] + 1));
+  for (let b = 0; b < buds; b++) startBloom(0.15 + Math.random() * 0.15);
+  petalBudget = (flowers.filter((flower) => flower.bloom > 0).length + EXTRA_BLOOMS) * PETAL_COUNT;
+  return { segA, segB, rest, fallA, fallB, fallC, push, breeze, step };
 }
 
 module.exports = createTree;

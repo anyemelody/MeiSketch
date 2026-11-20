@@ -14,7 +14,7 @@ precision mediump float;
 #define MAX_FALLING 32
 
 uniform vec2 u_resolution;
-uniform vec4 u_bgColor;
+uniform sampler2D u_wall;
 // Posed skeleton from tree.js.
 // u_segA: branch start, end of its first segment.
 // u_segB: end of its second segment, sway angle, cull radius.
@@ -327,7 +327,7 @@ vec4 bud(vec2 st, vec2 pos, float hue, float size, float index) {
 
 void main() {
     vec2 st = gl_FragCoord.xy / u_resolution.xy;
-    vec4 bgColor = u_bgColor;
+    vec4 bgColor = texture2D(u_wall, vec2(st.x, 1. - st.y));
     //tree
     vec4 treeColor = vec4(vec3(0.0), fractalTree(st));
 

@@ -5,9 +5,11 @@ const dat = require("dat.gui");
 const createTree = require("./tree");
 
 new p5();
-let flowerShader, flowerCanvas, windowCanvas, windowShader, snowShader, snowCanvas, tree;
+let flowerShader, wallShader, wallCanvas, wallImage, flowerCanvas, windowCanvas, windowShader, snowShader, snowCanvas, tree;
 
 function drawFlowerCanvas() {
+  //p5 unbinds sampler uniforms after every draw, the image itself stays uploaded
+  flowerShader.setUniform('u_wall', wallImage);
   flowerShader.setUniform('u_segA', tree.segA);
   flowerShader.setUniform('u_segB', tree.segB);
   flowerShader.setUniform('u_rest', tree.rest);
@@ -18,9 +20,25 @@ function drawFlowerCanvas() {
   flowerCanvas.quad(-512, -512, 512, -512, 512, 512, -512, 512);
 }
 
+function drawWall() {
+  wallCanvas.background(0, 0, 0, 0);
+  wallCanvas.quad(-512, -512, 512, -512, 512, 512, -512, 512);
+  //an image is uploaded once, a graphics would be uploaded every frame
+  wallImage = wallCanvas.get();
+}
+
+function updateWall() {
+  let color = guiProperty.bgColor.map(c => c / 255.);
+  color.push(1.);
+  wallShader.setUniform('u_color', color);
+  wallShader.setUniform('u_age', guiProperty.WallAge);
+  drawWall();
+  drawFlowerCanvas();
+}
+
 //setup gui
 const gui = new dat.GUI({ name: 'My GUI' });
-let guiProperty = { bgColor: [121, 23, 27.5], WindowShape: 8, WindowColor: [46, 77, 61] };
+let guiProperty = { bgColor: [121, 23, 27.5], WallAge: 0.6, WindowShape: 8, WindowColor: [46, 77, 61] };
 
 const settings = {
   dimensions: [1024, 1024],
@@ -46,30 +64,69 @@ gui.addColor(guiProperty, 'WindowColor', [46, 77, 61]).onChange(() => {
   windowCanvas.background(0, 0, 0, 0);
   windowCanvas.quad(-512, -512, 512, -512, 512, 512, -512, 512);
 });
-gui.addColor(guiProperty, 'bgColor', [121, 23, 27.5]).onChange(() => {
-  let color = guiProperty.bgColor.map(c => c / 255.);
-  color.push(1.);
-  flowerShader.setUniform('u_bgColor', color);
-  drawFlowerCanvas();
-});
+gui.addColor(guiProperty, 'bgColor', [121, 23, 27.5]).onChange(updateWall);
+gui.add(guiProperty, 'WallAge', 0, 1, 0.01).onChange(updateWall);
 
 
+
+//open the page with ?record to get a button that saves a video of the canvas
+function addRecordButton(canvas) {
+  const seconds = 25;
+  const button = createButton(`Record ${seconds}s`);
+  button.position(10, 110);
+  button.mousePressed(() => {
+    const mimeType = ['video/webm;codecs=vp9', 'video/webm'].find(type => MediaRecorder.isTypeSupported(type));
+    const recorder = new MediaRecorder(canvas.captureStream(30), { mimeType, videoBitsPerSecond: 12000000 });
+    const chunks = [];
+    recorder.ondataavailable = event => chunks.push(event.data);
+    recorder.onstop = () => {
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(new Blob(chunks, { type: 'video/webm' }));
+      link.download = 'mei-preview.webm';
+      link.click();
+      button.html(`Saved. Record ${seconds}s again`);
+      button.removeAttribute('disabled');
+    };
+    recorder.start();
+    button.attribute('disabled', '');
+    let left = seconds;
+    button.html(`Recording... ${left}s`);
+    const timer = setInterval(() => {
+      left--;
+      button.html(`Recording... ${left}s`);
+      if (left <= 0) {
+        clearInterval(timer);
+        recorder.stop();
+      }
+    }, 1000);
+  });
+}
 
 window.preload = () => {
   flowerShader = loadShader('./flower.vert', './flower.frag');
   windowShader = loadShader('./flower.vert', './windowPattern.frag');
+  wallShader = loadShader('./flower.vert', './wall.frag');
   snowShader = loadShader('./snow.vert', './snow.frag');
 };
 
 const sketch = ({ canvas }) => {
   let link = createA("https://github.com/anyemelody/MeiSketch", "Check out the source on Github", "_blank");
   link.position(10, 70);
+  if (new URLSearchParams(location.search).has('record')) addRecordButton(canvas);
   flowerCanvas = createGraphics(1024, 1024, WEBGL);
   flowerCanvas.shader(flowerShader);
   flowerCanvas.blendMode(BLEND);
   flowerShader.setUniform('u_resolution', [width, height]);
-  flowerShader.setUniform('u_bgColor', [0.475, 0.090, 0.108, 1.]);
+  wallCanvas = createGraphics(1024, 1024, WEBGL);
+  wallCanvas.shader(wallShader);
+  wallCanvas.blendMode(BLEND);
+  wallShader.setUniform('u_resolution', [width, height]);
+  wallShader.setUniform('u_color', [0.475, 0.090, 0.108, 1.]);
+  wallShader.setUniform('u_age', guiProperty.WallAge);
+  drawWall();
   tree = createTree(random(1));
+  //an opening gust, so the tree is already moving when it appears
+  tree.breeze(random([-1, 1]), random(-0.4, 0.1));
   drawFlowerCanvas();
 
   //a click taps the nearby branches downward, they sway back on their own
